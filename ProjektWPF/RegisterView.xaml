@@ -1,0 +1,15 @@
+﻿<Page x:Class="ProjektWPF.RegisterView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="http://metro.mahapps.com/winfx/xaml/controls"
+        Title="Rejestracja" Height="350" Width="400">
+    <Grid>
+        <StackPanel Margin="20">
+            <TextBox x:Name="NameTextBox" controls:TextBoxHelper.Watermark="Imię" Margin="5"/>
+            <TextBox x:Name="EmailTextBox" controls:TextBoxHelper.Watermark="Email" Margin="5"/>
+            <PasswordBox x:Name="PasswordBox" controls:TextBoxHelper.Watermark="Hasło" Margin="5"/>
+            <TextBox x:Name="AgeTextBox" controls:TextBoxHelper.Watermark="Wiek" Margin="5"/>
+            <Button Content="Zarejestruj" Click="RegisterButton_Click" Margin="5"/>
+        </StackPanel>
+    </Grid>
+</Page>
