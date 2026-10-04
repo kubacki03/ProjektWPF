@@ -5,13 +5,13 @@
         Title="Rejestracja" Height="350" Width="400">
     <Grid>
         <StackPanel Margin="20">
-            <TextBox x:Name="EmailTextBox" controls:TextBoxHelper.Watermark="Email" Margin="5"/>
-            <PasswordBox x:Name="PasswordBox" controls:TextBoxHelper.Watermark="Hasło" Margin="5"/>
+            <TextBox Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Email" Margin="5"/>
+            <PasswordBox controls:TextBoxHelper.Watermark="Hasło" Margin="5" PasswordChanged="PasswordBox_PasswordChanged"/>
 
             
-            <CheckBox x:Name="RememberMe" Content="Zapamiętaj mnie" Margin="5"/>
+            <CheckBox IsChecked="{Binding RememberMe}" Content="Zapamiętaj mnie" Margin="5"/>
 
-            <Button Content="Zaloguj" Click="LoginButton_Click" Margin="5"/>
+            <Button Content="Zaloguj" Command="{Binding LoginCommand}" Margin="5"/>
         </StackPanel>
     </Grid>
 </Page>

@@ -16,23 +16,19 @@
         </Grid.RowDefinitions>
 
         <StackPanel Orientation="Horizontal" Margin="10" Grid.Row="0">
-            <TextBox x:Name="ExpenseName" controls:TextBoxHelper.Watermark="Nazwa"   Width="149" />
-            <TextBox x:Name="ExpenseValue" controls:TextBoxHelper.Watermark="Wartosc"  Width="126" />
-            <TextBox x:Name="ExpenseCategory" controls:TextBoxHelper.Watermark="Rodzaj"  Width="136" />
-            <Button Content="Dodaj wydatek" Click="AddExpenseButton_Click" />
+            <TextBox Text="{Binding NewName, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Nazwa"   Width="149" />
+            <TextBox Text="{Binding NewValue, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Wartosc"  Width="126" />
+            <TextBox Text="{Binding NewCategory, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Rodzaj"  Width="136" />
+            <Button Content="Dodaj wydatek" Command="{Binding AddExpenseCommand}" />
             
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" Margin="527,9,-455,10">
 
-            <ComboBox x:Name="YearFilter" Width="100" SelectionChanged="FilterExpenses">
-                <ComboBoxItem Content="2023"/>
-                <ComboBoxItem Content="2024"/>
-                <ComboBoxItem Content="2025"/>
-            </ComboBox>
+            <ComboBox ItemsSource="{Binding Years}" SelectedItem="{Binding SelectedYear}" Width="100"/>
 
-            <Button Content="Filtruj" Click="FilterExpenses" />
-            <Button Content="Wroć" Click="BackButton_Click" />
+            <Button Content="Filtruj" Command="{Binding FilterCommand}" />
+            <Button Content="Wroć" Command="{Binding BackCommand}" />
         </StackPanel>
 
 
@@ -40,7 +36,7 @@
         <ListBox x:Name="ExpensesListBox" 
              Margin="10"
              Grid.Row="1"
-             SelectionChanged="ExpensesListBox_SelectionChanged">
+             ItemsSource="{Binding Expenses}">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Orientation="Horizontal">

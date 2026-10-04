@@ -10,13 +10,32 @@
 
     <Grid>
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel x:Name="UsersPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20" Orientation="Horizontal">
-                <!-- Tutaj dynamicznie zostaną dodani użytkownicy -->
-            </StackPanel>
+            <ItemsControl ItemsSource="{Binding SavedUsers}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Command="{Binding DataContext.LoginSavedUserCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                CommandParameter="{Binding Id}"
+                                Background="Transparent" BorderThickness="0" Margin="10">
+                            <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                                <Grid Width="100" Height="100">
+                                    <Ellipse Width="100" Height="100" Fill="LightGray" Stroke="Black" StrokeThickness="2"/>
+                                    <TextBlock Text="🧑" FontSize="50" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </ScrollViewer>
         <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center" Orientation="Horizontal">
-            <Button Content="Login" Click="Login" Margin="5" Width="200" Height="50"/>
-            <Button Content="Zarejestruj" Click="ShowRegister" Margin="5" Width="200" Height="50"/>
+            <Button Content="Login" Command="{Binding ShowLoginCommand}" Margin="5" Width="200" Height="50"/>
+            <Button Content="Zarejestruj" Command="{Binding ShowRegisterCommand}" Margin="5" Width="200" Height="50"/>
 
         </StackPanel>
     </Grid>

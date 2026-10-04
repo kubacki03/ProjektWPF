@@ -18,18 +18,16 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="2*" />
         </Grid.ColumnDefinitions>
-
-        <!-- Sekcja dodawania filmu -->
+ 
         <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Margin="10">
-            <TextBox x:Name="MovieTitleTextBox" controls:TextBoxHelper.Watermark="Tytul"  Width="200" />
-            <TextBox x:Name="MovieRatingTextBox" controls:TextBoxHelper.Watermark="Ocena"  Width="100" />
-            <Button Content="Dodaj film" Click="AddMovieButton_Click" />
-            <Button Content="Wroć" Click="BackButton_Click" />
+            <TextBox Text="{Binding NewTitle, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Tytul"  Width="200" />
+            <TextBox Text="{Binding NewRating, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Ocena"  Width="100" />
+            <Button Content="Dodaj film" Command="{Binding AddMovieCommand}" />
+            <Button Content="Wroć" Command="{Binding BackCommand}" />
+            <Button Content="Sortuj" Command="{Binding SortCommand}" />
         </StackPanel>
-
-        <!-- Lista filmów -->
-        <ListBox x:Name="MoviesListBox" Grid.Row="1" Margin="10"
-            SelectionChanged="MoviesListBox_SelectionChanged">
+ 
+        <ListBox ItemsSource="{Binding Movies}" SelectedItem="{Binding SelectedMovie}" Grid.Row="1" Margin="10">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Orientation="Horizontal">
@@ -41,16 +39,15 @@
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
-
-        <!-- Sekcja szczegółów filmu -->
-        <StackPanel Grid.Row="1" Grid.Column="1" >
-            <Image x:Name="PosterImage" Height="400" Stretch="Uniform" Margin="0,0,0,10" />
-            <TextBlock x:Name="TitleDetail" FontSize="26" FontWeight="Bold" Margin="0,0,0,5" Foreground="White"/>
-            <TextBlock x:Name="YearDetail" Margin="0,0,0,5" FontSize="15" Foreground="White"/>
-            <TextBlock x:Name="GenreDetail" Margin="0,0,0,5" FontSize="15" Foreground="White"/>
-            <TextBlock x:Name="RatingDetail" Margin="0,0,0,5" FontSize="15" Foreground="White" />
-            <TextBlock x:Name="PlotDetail" TextWrapping="Wrap" Margin="0,0,0,10" FontSize="15" Foreground="White"/>
-            <ItemsControl x:Name="ActorsList">
+ 
+        <StackPanel Grid.Row="1" Grid.Column="1" DataContext="{Binding SelectedMovie}">
+            <Image Source="{Binding Poster}" Height="400" Stretch="Uniform" Margin="0,0,0,10" />
+            <TextBlock Text="{Binding Title}" FontSize="26" FontWeight="Bold" Margin="0,0,0,5" Foreground="White"/>
+            <TextBlock Text="{Binding Year}" Margin="0,0,0,5" FontSize="15" Foreground="White"/>
+            <TextBlock Text="{Binding Genre}" Margin="0,0,0,5" FontSize="15" Foreground="White"/>
+            <TextBlock Text="{Binding MyRating, StringFormat=0.0}" Margin="0,0,0,5" FontSize="15" Foreground="White" />
+            <TextBlock Text="{Binding Plot}" TextWrapping="Wrap" Margin="0,0,0,10" FontSize="15" Foreground="White"/>
+            <ItemsControl ItemsSource="{Binding Actors}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Text="{Binding}" Foreground="White"/>

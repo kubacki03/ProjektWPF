@@ -5,11 +5,11 @@
         Title="Rejestracja" Height="350" Width="400">
     <Grid>
         <StackPanel Margin="20">
-            <TextBox x:Name="NameTextBox" controls:TextBoxHelper.Watermark="Imię" Margin="5"/>
-            <TextBox x:Name="EmailTextBox" controls:TextBoxHelper.Watermark="Email" Margin="5"/>
-            <PasswordBox x:Name="PasswordBox" controls:TextBoxHelper.Watermark="Hasło" Margin="5"/>
-            <TextBox x:Name="AgeTextBox" controls:TextBoxHelper.Watermark="Wiek" Margin="5"/>
-            <Button Content="Zarejestruj" Click="RegisterButton_Click" Margin="5"/>
+            <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Imię" Margin="5"/>
+            <TextBox Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Email" Margin="5"/>
+            <PasswordBox controls:TextBoxHelper.Watermark="Hasło" Margin="5" PasswordChanged="PasswordBox_PasswordChanged"/>
+            <TextBox Text="{Binding Age, UpdateSourceTrigger=PropertyChanged}" controls:TextBoxHelper.Watermark="Wiek" Margin="5"/>
+            <Button Content="Zarejestruj" Command="{Binding RegisterCommand}" Margin="5"/>
         </StackPanel>
     </Grid>
 </Page>
