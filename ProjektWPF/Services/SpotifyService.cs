@@ -1,306 +1,321 @@
-﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-
+using Microsoft.EntityFrameworkCore;
 using ProjektWPF.Data;
 
 namespace ProjektWPF.Services
 {
-    class SpotifyService
+    public record SpotifyTokens(string? AccessToken, string? RefreshToken);
+
+    public interface ISpotifyTokenStore
     {
-        private static readonly string CLIENT_ID = Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_ID");
-        private static readonly string CLIENT_SECRET = Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_SECRET");
-        private static readonly string REDIRECT_URI = "http://127.0.0.1:8080/callback";
-        private static readonly string TOKEN_URL = "https://accounts.spotify.com/api/token";
+        Task<SpotifyTokens> LoadAsync();
+        Task SaveAsync(SpotifyTokens tokens);
+    }
 
-        private static string accessToken;
-        private static string refreshToken;
-
-        private static readonly AppDbContext _context = new AppDbContext();
-
-        private static async Task GetRef()
+    /// <summary>Tokeny Spotify zalogowanego użytkownika trzymane w bazie danych.</summary>
+    public class DbSpotifyTokenStore : ISpotifyTokenStore
+    {
+        public async Task<SpotifyTokens> LoadAsync()
         {
-            using (HttpClient client = new HttpClient())
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, TOKEN_URL);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Basic",
-                    Convert.ToBase64String(Encoding.UTF8.GetBytes($"{CLIENT_ID}:{CLIENT_SECRET}")));
-
-                request.Content = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("grant_type", "refresh_token"),
-                    new KeyValuePair<string, string>("refresh_token", _context.Users.FirstOrDefault(i=>i.Id==Session.User.Id).refreshToken),
-                    new KeyValuePair<string, string>("client_id", CLIENT_ID)
-                });
-
-                HttpResponseMessage response = await client.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                using (JsonDocument json = JsonDocument.Parse(responseBody))
-                {
-                    refreshToken = json.RootElement.GetProperty("refresh_token").GetString();
-                    accessToken = json.RootElement.GetProperty("access_token").GetString();
-
-                    var user = _context.Users.FirstOrDefault(i => i.Id == Session.User.Id);
-                    user.accessToken = accessToken;
-                    user.refreshToken = refreshToken;
-                    _context.SaveChanges();
-                }
-            }
+            await using var context = new AppDbContext();
+            var user = await context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == Session.User.Id);
+            return new SpotifyTokens(user?.accessToken, user?.refreshToken);
         }
 
-        public static void LoginWithSpotify()
+        public async Task SaveAsync(SpotifyTokens tokens)
         {
-            string scope = "user-read-playback-state user-modify-playback-state";
-
-            string authUrl = $"https://accounts.spotify.com/authorize?client_id={CLIENT_ID}" +
-                             "&response_type=code" +
-                             $"&redirect_uri={Uri.EscapeDataString(REDIRECT_URI)}" +
-                             $"&scope={Uri.EscapeDataString(scope)}" +
-                             "&show_dialog=true";
-
-            Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
-
-            StartLocalHttpListener();
-        }
-
-        private static async void StartLocalHttpListener()
-        {
-            HttpListener listener = new HttpListener();
-            listener.Prefixes.Add(REDIRECT_URI + "/");
-            listener.Start();
-            Console.WriteLine("Czekam na kod autoryzacyjny...");
-
-            var context = await listener.GetContextAsync();
-            var code = context.Request.QueryString["code"];
-
-            if (code != null)
+            await using var context = new AppDbContext();
+            var user = await context.Users.FirstOrDefaultAsync(u => u.Id == Session.User.Id);
+            if (user == null)
             {
-                Console.WriteLine("Kod autoryzacyjny otrzymany: " + code);
-                await GetAccessToken(code);
-                Console.WriteLine("Dostęp uzyskany!");
-            }
-
-            context.Response.StatusCode = 200;
-            context.Response.Close();
-            listener.Stop();
-        }
-
-        private static async Task GetAccessToken(string code)
-        {
-            using (HttpClient client = new HttpClient())
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, TOKEN_URL);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Basic",
-                    Convert.ToBase64String(Encoding.UTF8.GetBytes($"{CLIENT_ID}:{CLIENT_SECRET}")));
-
-                request.Content = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("grant_type", "authorization_code"),
-                    new KeyValuePair<string, string>("code", code),
-                    new KeyValuePair<string, string>("redirect_uri", REDIRECT_URI)
-                });
-
-                HttpResponseMessage response = await client.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                using (JsonDocument json = JsonDocument.Parse(responseBody))
-                {
-                    refreshToken = json.RootElement.GetProperty("refresh_token").GetString();
-                    accessToken = json.RootElement.GetProperty("access_token").GetString();
-
-                    var user = _context.Users.FirstOrDefault(i => i.Id == Session.User.Id);
-                    user.accessToken = accessToken;
-                    user.refreshToken = refreshToken;
-                    _context.SaveChanges();
-                }
-            }
-        }
-
-        public async Task Pause()
-        {
-            if (string.IsNullOrEmpty(accessToken))
-            {
-                Console.WriteLine("Brak tokena dostępu. Najpierw zaloguj użytkownika.");
                 return;
             }
 
-            using (HttpClient client = new HttpClient())
+            user.accessToken = tokens.AccessToken;
+            user.refreshToken = tokens.RefreshToken;
+            await context.SaveChangesAsync();
+        }
+    }
+
+    public class SpotifyService
+    {
+        private const string RedirectUri = "http://127.0.0.1:8080/callback";
+        private const string TokenUrl = "https://accounts.spotify.com/api/token";
+        private const string ApiUrl = "https://api.spotify.com/v1";
+        private const string Scope = "user-read-playback-state user-modify-playback-state";
+
+        private static readonly HttpClient SharedClient = new HttpClient();
+
+        private readonly HttpClient _http;
+        private readonly ISpotifyTokenStore _tokens;
+        private readonly string? _clientId;
+        private readonly string? _clientSecret;
+        private readonly SemaphoreSlim _refreshLock = new SemaphoreSlim(1, 1);
+
+        private SpotifyTokens? _cached;
+
+        public SpotifyService()
+            : this(SharedClient, new DbSpotifyTokenStore(),
+                   Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_ID"),
+                   Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_SECRET"))
+        {
+        }
+
+        public SpotifyService(HttpClient http, ISpotifyTokenStore tokens, string? clientId, string? clientSecret)
+        {
+            _http = http;
+            _tokens = tokens;
+            _clientId = clientId;
+            _clientSecret = clientSecret;
+        }
+
+        // ---------- Logowanie (Authorization Code Flow) ----------
+
+        public async Task LoginAsync(CancellationToken cancellationToken = default)
+        {
+            RequireCredentials();
+
+            string state = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+            string authUrl = "https://accounts.spotify.com/authorize" +
+                             $"?client_id={Uri.EscapeDataString(_clientId!)}" +
+                             "&response_type=code" +
+                             $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}" +
+                             $"&scope={Uri.EscapeDataString(Scope)}" +
+                             $"&state={state}" +
+                             "&show_dialog=true";
+
+            using var listener = new HttpListener();
+            listener.Prefixes.Add(RedirectUri + "/");
+            listener.Start();
+
+            try
             {
-                var request = new HttpRequestMessage(HttpMethod.Put, "https://api.spotify.com/v1/me/player/pause");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
 
-                HttpResponseMessage response = await client.SendAsync(request);
+                using var registration = cancellationToken.Register(listener.Stop);
+                HttpListenerContext context;
+                try
+                {
+                    context = await listener.GetContextAsync();
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
 
-                if (response.IsSuccessStatusCode)
+                string? code = context.Request.QueryString["code"];
+                bool stateOk = context.Request.QueryString["state"] == state;
+
+                await RespondAsync(context, code != null && stateOk
+                    ? "Zalogowano do Spotify. Możesz zamknąć to okno."
+                    : "Logowanie do Spotify nie powiodło się.");
+
+                if (code == null || !stateOk)
                 {
-                    Console.WriteLine("Muzyka zatrzymana.");
+                    throw new InvalidOperationException("Spotify nie zwróciło poprawnego kodu autoryzacyjnego.");
                 }
-                else
-                {
-                    GetRef();
-                    Pause();
-                }
+
+                await ExchangeCodeAsync(code, cancellationToken);
+            }
+            finally
+            {
+                listener.Close();
             }
         }
 
-        public async Task GetUsersPlaylist()
+        private static async Task RespondAsync(HttpListenerContext context, string message)
         {
-            if (string.IsNullOrEmpty(accessToken))
+            byte[] body = Encoding.UTF8.GetBytes($"<html><meta charset=\"utf-8\"><body>{message}</body></html>");
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "text/html; charset=utf-8";
+            context.Response.ContentLength64 = body.Length;
+            await context.Response.OutputStream.WriteAsync(body);
+            context.Response.Close();
+        }
+
+        private async Task ExchangeCodeAsync(string code, CancellationToken cancellationToken)
+        {
+            var tokens = await RequestTokensAsync(new Dictionary<string, string>
             {
-                Console.WriteLine("Brak tokena dostępu. Najpierw zaloguj użytkownika.");
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["redirect_uri"] = RedirectUri
+            }, previousRefreshToken: null, cancellationToken);
+
+            await StoreAsync(tokens);
+        }
+
+        // ---------- Komendy odtwarzacza ----------
+
+        public Task Pause() =>
+            SendAsync(() => new HttpRequestMessage(HttpMethod.Put, $"{ApiUrl}/me/player/pause"));
+
+        public Task StartPlay() =>
+            SendAsync(() => new HttpRequestMessage(HttpMethod.Put, $"{ApiUrl}/me/player/play"));
+
+        public Task SkipToNext() =>
+            SendAsync(() => new HttpRequestMessage(HttpMethod.Post, $"{ApiUrl}/me/player/next"));
+
+        public Task SkipToPrevious() =>
+            SendAsync(() => new HttpRequestMessage(HttpMethod.Post, $"{ApiUrl}/me/player/previous"));
+
+        public Task SetVolume(int volume)
+        {
+            int percent = Math.Clamp(volume, 0, 100);
+            return SendAsync(() => new HttpRequestMessage(HttpMethod.Put,
+                $"{ApiUrl}/me/player/volume?volume_percent={percent}"));
+        }
+
+        /// <summary>Włącza pierwszą playlistę użytkownika.</summary>
+        public async Task PlayFirstPlaylist()
+        {
+            string json = await SendAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{ApiUrl}/me/playlists?limit=1"));
+
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("items", out var items) || items.GetArrayLength() == 0)
+            {
+                throw new InvalidOperationException("Nie znaleziono żadnej playlisty.");
             }
 
-            using (HttpClient client = new HttpClient())
+            string playlistId = items[0].GetProperty("id").GetString()!;
+            await SendAsync(() => new HttpRequestMessage(HttpMethod.Put, $"{ApiUrl}/me/player/play")
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, "https://api.spotify.com/v1/me/playlists?limit=1");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                Content = JsonContent.Create(new { context_uri = "spotify:playlist:" + playlistId })
+            });
+        }
 
-                HttpResponseMessage response = await client.SendAsync(request);
+        // ---------- Wspólna obsługa żądań ----------
 
-                if (response.IsSuccessStatusCode)
+        /// <summary>
+        /// Wysyła żądanie z tokenem dostępu. Przy 401 odświeża token i ponawia żądanie dokładnie raz.
+        /// Fabryka jest potrzebna, bo HttpRequestMessage nie można wysłać dwa razy.
+        /// </summary>
+        private async Task<string> SendAsync(Func<HttpRequestMessage> createRequest)
+        {
+            var tokens = await GetTokensAsync();
+            if (string.IsNullOrEmpty(tokens.AccessToken))
+            {
+                if (string.IsNullOrEmpty(tokens.RefreshToken))
                 {
-                    Console.WriteLine("Znaleziono piosenki");
-                }
-                else
-                {
-                    Console.WriteLine("Błąd: " + (int)response.StatusCode);
-                }
-
-                string responseBody = await response.Content.ReadAsStringAsync();
-                string id = "error";
-                using (JsonDocument json = JsonDocument.Parse(responseBody))
-                {
-                    JsonElement root = json.RootElement;
-                    if (root.TryGetProperty("items", out JsonElement items) && items.GetArrayLength() > 0)
-                    {
-                        id = items[0].GetProperty("id").GetString();
-                        Console.WriteLine($"ID: {id}");
-                    }
+                    throw new InvalidOperationException("Brak tokena dostępu. Najpierw zaloguj się do Spotify.");
                 }
 
-                var request2 = new HttpRequestMessage(HttpMethod.Put, "https://api.spotify.com/v1/me/player/play");
-                request2.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                tokens = await RefreshAsync(tokens);
+            }
 
-                var body = new
+            using var response = await SendWithTokenAsync(createRequest, tokens.AccessToken!);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                tokens = await RefreshAsync(tokens);
+                using var retry = await SendWithTokenAsync(createRequest, tokens.AccessToken!);
+                return await ReadResultAsync(retry);
+            }
+
+            return await ReadResultAsync(response);
+        }
+
+        private async Task<HttpResponseMessage> SendWithTokenAsync(Func<HttpRequestMessage> createRequest, string accessToken)
+        {
+            using var request = createRequest();
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            return await _http.SendAsync(request);
+        }
+
+        private static async Task<string> ReadResultAsync(HttpResponseMessage response)
+        {
+            string body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException($"Spotify zwróciło błąd {(int)response.StatusCode}: {body}", null, response.StatusCode);
+            }
+
+            return body;
+        }
+
+        // ---------- Tokeny ----------
+
+        private async Task<SpotifyTokens> GetTokensAsync() => _cached ??= await _tokens.LoadAsync();
+
+        private async Task StoreAsync(SpotifyTokens tokens)
+        {
+            _cached = tokens;
+            await _tokens.SaveAsync(tokens);
+        }
+
+        private async Task<SpotifyTokens> RefreshAsync(SpotifyTokens stale)
+        {
+            await _refreshLock.WaitAsync();
+            try
+            {
+                // Inne równoległe żądanie mogło już odświeżyć token.
+                if (_cached != null && _cached.AccessToken != stale.AccessToken && !string.IsNullOrEmpty(_cached.AccessToken))
                 {
-                    context_uri = "spotify:playlist:" + id
-                };
-
-                request2.Content = JsonContent.Create(body);
-
-                HttpResponseMessage response2 = await client.SendAsync(request);
-                string responseBody2 = await response.Content.ReadAsStringAsync();
-
-                if (response2.IsSuccessStatusCode)
-                {
-                    Console.WriteLine("Playback started successfully.");
+                    return _cached;
                 }
-                else
+
+                if (string.IsNullOrEmpty(stale.RefreshToken))
                 {
-                    Console.WriteLine($"Error: {responseBody2}");
+                    throw new InvalidOperationException("Sesja Spotify wygasła. Zaloguj się ponownie.");
                 }
+
+                var refreshed = await RequestTokensAsync(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "refresh_token",
+                    ["refresh_token"] = stale.RefreshToken
+                }, stale.RefreshToken, CancellationToken.None);
+
+                await StoreAsync(refreshed);
+                return refreshed;
+            }
+            finally
+            {
+                _refreshLock.Release();
             }
         }
 
-       
-
-        public async Task StartPlay()
+        private async Task<SpotifyTokens> RequestTokensAsync(
+            Dictionary<string, string> form, string? previousRefreshToken, CancellationToken cancellationToken)
         {
-            using (HttpClient client = new HttpClient())
+            RequireCredentials();
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, TokenUrl)
             {
-                var request = new HttpRequestMessage(HttpMethod.Put, "https://api.spotify.com/v1/me/player/play");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                Content = new FormUrlEncodedContent(form)
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_clientId}:{_clientSecret}")));
 
-                HttpResponseMessage response = await client.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine("Playback started successfully.");
-                }
-                else
-                {
-                    GetRef();
-                    StartPlay();
-                    Console.WriteLine($"Error: {responseBody}");
-                }
+            using var response = await _http.SendAsync(request, cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException($"Nie udało się pobrać tokena Spotify ({(int)response.StatusCode}): {body}", null, response.StatusCode);
             }
+
+            using var json = JsonDocument.Parse(body);
+            string accessToken = json.RootElement.GetProperty("access_token").GetString()!;
+
+            // Przy odświeżaniu Spotify nie musi zwracać nowego refresh tokena – wtedy zostaje stary.
+            string? refreshToken = json.RootElement.TryGetProperty("refresh_token", out var rt)
+                ? rt.GetString()
+                : previousRefreshToken;
+
+            return new SpotifyTokens(accessToken, refreshToken);
         }
 
-        public async Task SkipToNext()
+        private void RequireCredentials()
         {
-            using (HttpClient client = new HttpClient())
+            if (string.IsNullOrEmpty(_clientId) || string.IsNullOrEmpty(_clientSecret))
             {
-                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.spotify.com/v1/me/player/next");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-
-                HttpResponseMessage response = await client.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine("Playback started successfully.");
-                }
-                else
-                {
-                    GetRef();
-                    SkipToNext();
-                    Console.WriteLine($"Error: {responseBody}");
-                }
-            }
-        }
-
-        public async Task SkipToPrevious()
-        {
-            using (HttpClient client = new HttpClient())
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.spotify.com/v1/me/player/previous");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-
-                HttpResponseMessage response = await client.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine("Playback started successfully.");
-                }
-                else
-                {
-                    GetRef();
-                    SkipToPrevious();
-                    Console.WriteLine($"Error: {responseBody}");
-                }
-            }
-        }
-
-        public async Task SetVolume(int volume)
-        {
-            using (HttpClient client = new HttpClient())
-            {
-                var request = new HttpRequestMessage(HttpMethod.Put,
-                    $"https://api.spotify.com/v1/me/player/volume?volume_percent={volume}");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-
-                HttpResponseMessage response = await client.SendAsync(request);
-                string responseBody = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine("Playback started successfully.");
-                }
-                else
-                {
-                    GetRef();
-                    SetVolume(volume);
-                    Console.WriteLine($"Error: {responseBody}");
-                }
+                throw new InvalidOperationException(
+                    "Brak zmiennych środowiskowych SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET.");
             }
         }
     }

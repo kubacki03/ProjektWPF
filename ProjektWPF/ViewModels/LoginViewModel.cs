@@ -46,15 +46,19 @@ namespace ProjektWPF.ViewModels
 
         private async Task LoginAsync()
         {
-            string passwordHash = PasswordHasher.HashPassword(Password);
-
             await using var context = new AppDbContext();
-            var user = await context.Users.FirstOrDefaultAsync(p => p.Email == Email && p.Password == passwordHash);
+            var user = await context.Users.FirstOrDefaultAsync(p => p.Email == Email);
 
-            if (user == null)
+            if (user == null || !PasswordHasher.Verify(Password, user.Password))
             {
                 _dialogs.ShowWarning("Błedne dane!");
                 return;
+            }
+
+            if (PasswordHasher.NeedsRehash(user.Password))
+            {
+                user.Password = PasswordHasher.HashPassword(Password);
+                await context.SaveChangesAsync();
             }
 
             if (RememberMe)

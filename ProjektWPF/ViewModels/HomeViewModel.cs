@@ -138,7 +138,7 @@ namespace ProjektWPF.ViewModels
             LogoutCommand = new RelayCommand(Logout);
             ToggleSystemMonitorCommand = new AsyncRelayCommand(ToggleSystemMonitorAsync);
 
-            SpotifyLoginCommand = new RelayCommand(() => SpotifyService.LoginWithSpotify());
+            SpotifyLoginCommand = new AsyncRelayCommand(() => RunSpotifyAsync(() => _spotify.LoginAsync(_lifetime.Token)));
             PauseCommand = new AsyncRelayCommand(() => RunSpotifyAsync(_spotify.Pause));
             StartPlayCommand = new AsyncRelayCommand(() => RunSpotifyAsync(_spotify.StartPlay));
             SkipNextCommand = new AsyncRelayCommand(() => RunSpotifyAsync(_spotify.SkipToNext));
@@ -244,6 +244,9 @@ namespace ProjektWPF.ViewModels
             try
             {
                 await action();
+            }
+            catch (OperationCanceledException)
+            {
             }
             catch (Exception ex)
             {
